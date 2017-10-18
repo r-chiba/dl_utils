@@ -2,6 +2,7 @@ from __future__ import division
 from __future__ import print_function
 import os
 import sys
+import multiprocessing as mp
 import cPickle
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.decomposition import PCA
@@ -208,7 +209,16 @@ class Cifar10Dataset(DatasetBase):
         x = encoder.fit_transform(x).toarray()
         return x
 
+
+def load_images(images_list, q, proc_no):
+    images = [cv2.resize(cv2.cvtColor(cv2.imread(f), cv2.COLOR_BGR2RGB), (64, 64)).astype(np.float32) / 255.
+                for f in images_list]
+    images = np.asarray(images)
+    q.put((images, proc_no))
+    return
+
 class CelebADataset(DatasetBase):
+
     def __init__(self, dataset_path, code_dim, code_init):
         self.images = None
         self.codes = None
@@ -216,11 +226,30 @@ class CelebADataset(DatasetBase):
         if self.images is None:
             print('load images...')
             files = glob.glob(os.path.join(dataset_path, '*.jpg'))
-            images = [cv2.imread(file) for file in files]
-            images = [cv2.cvtColor(image, cv2.COLOR_BGR2RGB) for image in images]
-            images = [cv2.resize(image, (64, 64)) for image in images]
-            images = [image.astype(np.float32) / 255. for image in images]
-            self.images = np.asarray(images)
+            n_processes = 2
+            dataset_size = len(files)
+            sublist_size = int(dataset_size/n_processes)
+            files_ = [files[i*sublist_size:(i+1)*sublist_size] for i in xrange(n_processes)]
+            if sublist_size*n_processes < dataset_size:
+                files_[n_processes-1].extend(files[n_processes*sublist_size:])
+            q = mp.Queue()
+            processes = []
+            for i in xrange(n_processes):
+                p = mp.Process(target=load_images, args=(files_[i], q, i))
+                p.daemon = True
+                p.start()
+                processes.append(p)
+            self.images = np.empty([dataset_size, 64, 64, 3])
+            count = 0
+            while True:
+                while q.empty(): time.sleep(0.01)
+                l, i = q.get()
+                if i != n_processes-1:
+                    self.images[i*sublist_size:(i+1)*sublist_size] = l
+                else:
+                    self.images[i*sublist_size:] = l
+                count += len(l)
+                if count == dataset_size: break
             print('done.')
 
         # dummy labels
