@@ -2,6 +2,7 @@ from __future__ import division
 from __future__ import print_function
 import os
 import sys
+import time
 import multiprocessing as mp
 import cPickle
 from sklearn.preprocessing import OneHotEncoder
@@ -211,10 +212,12 @@ class Cifar10Dataset(DatasetBase):
 
 
 def load_images(images_list, q, proc_no):
+    print(proc_no, len(images_list))
     images = [cv2.resize(cv2.cvtColor(cv2.imread(f), cv2.COLOR_BGR2RGB), (64, 64)).astype(np.float32) / 255.
                 for f in images_list]
     images = np.asarray(images)
     q.put((images, proc_no))
+    print('%d done.'%proc_no)
     return
 
 class CelebADataset(DatasetBase):
@@ -226,7 +229,7 @@ class CelebADataset(DatasetBase):
         if self.images is None:
             print('load images...')
             files = glob.glob(os.path.join(dataset_path, '*.jpg'))
-            n_processes = 2
+            n_processes = 8
             dataset_size = len(files)
             sublist_size = int(dataset_size/n_processes)
             files_ = [files[i*sublist_size:(i+1)*sublist_size] for i in xrange(n_processes)]
@@ -249,6 +252,7 @@ class CelebADataset(DatasetBase):
                 else:
                     self.images[i*sublist_size:] = l
                 count += len(l)
+                processes[i].terminate()
                 if count == dataset_size: break
             print('done.')
 

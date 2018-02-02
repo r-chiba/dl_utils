@@ -3,6 +3,32 @@ from __future__ import print_function
 import math
 import tensorflow as tf
 import numpy as np
+import pylab
+import seaborn as sb
+
+def run_ops_test(model, ops, feed_dict):
+    if hasattr(model, 'keep_prob'):
+        feed_dict[model.keep_prob] = 1.0
+        return model.sess.run(ops, feed_dict=feed_dict)
+    else:
+        return model.sess.run(ops, feed_dict=feed_dict)
+
+def tile_images(imgs, square=True):
+    h = imgs[0].shape[0]
+    w = imgs[0].shape[1]
+    d = int(math.sqrt(imgs.shape[0]-1))+1 if square else imgs.shape[0]
+    dh, dw = (d, d) if square else (1, d)
+    r = np.zeros((h*dh, w*dw, 3), dtype=np.float32)
+    for idx, img in enumerate(imgs):
+        idx_y = int(idx/dh) if square else 0
+        idx_x = idx-idx_y*dw
+        r[idx_y*h:(idx_y+1)*h, idx_x*w:(idx_x+1)*w, :] = img
+    return r
+
+def softmax(x):
+    # x: 2-dimensional array
+    max_values = np.amax(x, 1, keepdims=True)
+    return np.exp(x - max_values) / np.sum(np.exp(x - max_values), axis=1, keepdims=True)
 
 def pad_out_size_same(in_size, stride):
     return int(math.ceil(float(in_size) / float(stride)))
@@ -114,6 +140,19 @@ def get_laplacian_pyramid(batch, level):
         ret.append(img - img_us)
     return ret
 
+# return last lebel gaussian pyramid
+def get_laplacian_pyramid2(batch, level):
+    ret = []
+    gp = get_gaussian_pyramid(batch, level+1)
+    batch_cur = batch
+    for i in xrange(level):
+        img = gp[i]
+        size = img.get_shape()[1:3]
+        img_us = tf.image.resize_images(gp[i+1], size)
+        ret.append(img - img_us)
+    ret.append(gp[level])
+    return ret
+
 def laplacian_pyramid_loss(batch1, batch2, level):
     lp1 = get_laplacian_pyramid(batch1, level)
     lp2 = get_laplacian_pyramid(batch2, level)
@@ -121,4 +160,43 @@ def laplacian_pyramid_loss(batch1, batch2, level):
     for i in xrange(level):
         ret += 2**(-2*(i+1)) * tf.reduce_mean(tf.abs(lp1[i] - lp2[i]))
     return ret
+
+def laplacian_pyramid_loss2(lp1, lp2):
+    ret = 0.
+    level = len(lp1)
+    for i in xrange(level):
+        ret += 2**(-2*(i+1)) * tf.reduce_mean(tf.abs(lp1[i] - lp2[i]))
+    return ret
+
+# argument must be pyramid returned from get_laplacian_pyramid2
+def construct_image_from_laplacian_pyramid(pyramid):
+    img = pyramid[-1]
+    for elem in reversed(pyramid[:-1]):
+        ht, wh = img.get_shape().as_list()[1:3]
+        img = tf.image.resize_images(img, [2*ht, 2*wh])
+        img += elem
+    return img
+
+def plot_kde(data, img_path='kde.png', color='Greens'):
+    fig = pylab.gcf()
+    fig.set_size_inches(16.0, 16.0)
+    pylab.clf()
+    bg_color = sb.color_palette(color, n_colors=256)[0]
+    ax = sb.kdeplot(data[:, 0], data[:, 1], shade=True, cmap=color, n_level=30,
+        clip=[[-2.5, 2.5]]*2)
+    ax.set_axis_bgcolor(bg_color)
+    kde = ax.get_figure()
+    pylab.xlim(-2.5, 2.5)
+    pylab.ylim(-2.5, 2.5)
+    kde.savefig(img_path)
+
+def plot_scatter(data, img_path='kde.png', color='blue'):
+    fig = pylab.gcf()
+    fig.set_size_inches(16.0, 16.0)
+    pylab.clf()
+    pylab.scatter(data[:, 0], data[:, 1], s=20, marker='o', edgecolors='none',
+        color=color)
+    pylab.xlim(-2.5, 2.5)
+    pylab.ylim(-2.5, 2.5)
+    pylab.savefig(img_path)
 
